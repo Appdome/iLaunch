@@ -1,7 +1,7 @@
 CC := clang
 LD := clang # Requires less arguments
 CFLAGS += -g -fobjc-arc
-LDFLAGS += -Wl,-rpath,/tmp/.xcodelib1,-rpath,/tmp/.xcodelib2,-rpath,/tmp/.xcodelib3 -framework Foundation -g
+LDFLAGS += -Wl,-rpath,/tmp/.xcodelib1,-rpath,/tmp/.xcodelib2,-rpath,/tmp/.xcodelib3 -framework Foundation -g -Wl,-exported_symbols_list,/dev/null
 
 ilaunch: main.m.o xcode.m.o
 	$(LD) -o $@ $^ $(LDFLAGS)
