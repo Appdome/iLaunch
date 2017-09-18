@@ -34,7 +34,7 @@ SOFTWARE.
    Xcode's libraries. */
    
 /* Define false classes so we can link statically */
-#define X(class) char OBJC_CLASS_$_##class;
+#define X(class, weak) char OBJC_CLASS_$_##class;
 #include "classes.x"
 #undef X
 
@@ -81,6 +81,12 @@ __attribute__((constructor)) static void link_and_init_xcode(void)
     /* Disable logs (Many irrelevant assertions are printed) */
     int errfd = dup(STDERR_FILENO);
     close(STDERR_FILENO);
+    
+    int devnull = open("/dev/null", O_WRONLY);
+    if (devnull != STDERR_FILENO) {
+        dup2(devnull, STDERR_FILENO);
+        close(devnull);
+    }
     
     if (!dlopen(XCODE_REL("/Contents/Frameworks/IDEFoundation.framework/Versions/A/IDEFoundation"), RTLD_LAZY) ||
         !dlopen(XCODE_REL("/Contents/SharedFrameworks/DVTFoundation.framework/Versions/A/DVTFoundation"), RTLD_LAZY)) {
@@ -138,10 +144,10 @@ __attribute__((constructor)) static void link_and_init_xcode(void)
        reference using objc_getClass. */
     Class *classref = classrefs;
     while (classref != &classrefs_end) {
-        #define X(class) \
+        #define X(class, weak) \
         if (*classref == (Class) &OBJC_CLASS_$_##class) { \
             *classref = objc_getClass(#class);\
-            assert(#class && *classref); \
+            assert((#class && *classref) || weak); \
         }
         #include "classes.x"
         #undef X

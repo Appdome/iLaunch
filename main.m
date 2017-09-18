@@ -396,7 +396,7 @@ int main(int argc, const char * argv[])
             }
         }
         
-        method_setImplementation(class_getInstanceMethod([DTDKMobileDeviceToken class], @selector(copyAndProcessSharedCache)),
+        method_setImplementation(class_getInstanceMethod([DTDKMobileDeviceToken class] ?: [DTDKRemoteDeviceToken class], @selector(copyAndProcessSharedCache)),
                                  (IMP) copy_shared_cache);
         
         if (!bundle_id != (list || list_devs || extract_crash_logs || delete_crash_logs || screenshot_dest)) {
