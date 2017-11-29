@@ -9,6 +9,7 @@ iLaunch can do the following:
  * Launch any user-installed or system application
  * Optionally output a launched app's logs to stdout while it's running
  * Pass arguments and environment variables to any launched app
+ * Debugging launched applications with `lldb`, as well as attaching to running processes (If they're signed for testing)
  * Show information about the connected devices
  * List the installed apps and their installation directory
  * Extract an application's sandbox
