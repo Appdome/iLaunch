@@ -53,7 +53,9 @@ int (*AFCRemovePath)(id connection, const char *path);
 int (*AFCDirectoryOpen)(id connection, const char *path, id *dir);
 int (*AFCDirectoryRead)(id connection, id dir, char **dirent);
 int (*AFCDirectoryClose)(id connection, id dir);
-
+int (*AMDeviceSecureStartService)(id device, NSString *service_name, NSDictionary *options, id *result);
+int (*AMDeviceStartSession)(id device);
+int (*AMDeviceConnect)(id device);
 
 __attribute__((constructor)) static void link_and_init_xcode(void)
 {
@@ -139,6 +141,16 @@ __attribute__((constructor)) static void link_and_init_xcode(void)
     
     AFCDirectoryClose = dlsym(RTLD_DEFAULT, "AFCDirectoryClose");
     assert(AFCDirectoryClose);
+    
+    AMDeviceSecureStartService = dlsym(RTLD_DEFAULT, "AMDeviceSecureStartService");
+    assert(AMDeviceSecureStartService);
+
+    AMDeviceStartSession = dlsym(RTLD_DEFAULT, "AMDeviceStartSession");
+    assert(AMDeviceStartSession);
+    
+    AMDeviceConnect = dlsym(RTLD_DEFAULT, "AMDeviceConnect");
+    assert(AMDeviceConnect);
+
     
     /* After loading, check for any false class we declared to fix its 
        reference using objc_getClass. */

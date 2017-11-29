@@ -108,29 +108,6 @@ SOFTWARE.
 - (id)initWithExecutionEnvironment:(IDEExecutionEnvironment *)arg1 launchParameters:(IDELaunchParametersSnapshot *)arg2 runnableDisplayName:(NSString *)arg3 runnableType:(id)arg4 runDestination:(IDERunDestination *)arg5;
 @end
 
-@interface DTDKRemoteDeviceToken : NSObject
-- (id) deviceName;
-- (id) deviceSerialNumber;
-- (id) deviceClass;
-- (id) productVersion;
-- (id) deviceArchitecture;
-- (NSNumber *) deviceAvailableCapacity;
-- (NSNumber *) deviceTotalCapacity;
-- (bool) deviceIsActivated;
-- (id) startCrashReportCopyMobileServiceWithError:(id *)error;
-@end
-
-@interface DVTiOSDevice : NSObject
-+ (id)alliOSDevices;
-- (NSSet *)applications;
-- (NSSet *)systemApplications;
-- (NSString *)identifier;
-- (DTDKRemoteDeviceToken *) token;
-- (id) softwareVersion;
-- (bool) isRunningSupportedOS;
-- (void) takeScreenshotWithCompletionBlock:(void (^)(NSString *))block;
-@end
-
 @interface DVTDeviceManager : NSObject
 - (void) startLocating;
 - (void) stopLocating;
@@ -197,6 +174,7 @@ SOFTWARE.
 
 @interface DVTFilePath : NSObject
 +(instancetype) filePathForPathString: (NSString *)string;
+-(NSString *) pathString;
 @end
 
 @interface IDEExecutionRunnableTracker : NSObject
@@ -211,14 +189,43 @@ SOFTWARE.
 @interface DTDKCrashLogDatabase : NSObject
 @end
 
-@interface DTDKCrashLogCopying : NSObject
-+(void) checkDevice:(DTDKRemoteDeviceToken *) device;
-@end
-
 @interface DVTiPhoneScreenshotController : NSObject
 @end
 
+@interface DTDKRemoteDeviceConnection : NSObject
+- (id) deviceRef;
+@end
+
 @interface DTDKMobileDeviceToken : NSObject
+- (DTDKRemoteDeviceConnection *) primaryConnection;
+- (DVTFilePath *) idealExistingSymbolsDirectory:(void *) unknown;
+@end
+
+@interface DTDKRemoteDeviceToken : DTDKMobileDeviceToken
+- (id) deviceName;
+- (id) deviceSerialNumber;
+- (id) deviceClass;
+- (id) productVersion;
+- (id) deviceArchitecture;
+- (NSNumber *) deviceAvailableCapacity;
+- (NSNumber *) deviceTotalCapacity;
+- (bool) deviceIsActivated;
+- (id) startCrashReportCopyMobileServiceWithError:(id *)error;
+@end
+
+@interface DVTiOSDevice : NSObject
++ (id)alliOSDevices;
+- (NSSet *)applications;
+- (NSSet *)systemApplications;
+- (NSString *)identifier;
+- (DTDKRemoteDeviceToken *) token;
+- (id) softwareVersion;
+- (bool) isRunningSupportedOS;
+- (void) takeScreenshotWithCompletionBlock:(void (^)(NSString *))block;
+@end
+
+@interface DTDKCrashLogCopying : NSObject
++(void) checkDevice:(DTDKRemoteDeviceToken *) device;
 @end
 
 @interface DVTFuture : NSObject
@@ -233,3 +240,6 @@ extern int (*AFCRemovePath)(id connection, const char *path);
 extern int (*AFCDirectoryOpen)(id connection, const char *path, id *dir);
 extern int (*AFCDirectoryRead)(id connection, id dir, char **dirent);
 extern int (*AFCDirectoryClose)(id connection, id dir);
+extern int (*AMDeviceSecureStartService)(id device, NSString *service_name, NSDictionary *options, id *result);
+extern int (*AMDeviceStartSession)(id device);
+extern int (*AMDeviceConnect)(id device);

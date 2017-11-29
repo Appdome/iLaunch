@@ -287,6 +287,27 @@ void launch_app(DVTiOSDevice *device, DTDKApplication *app, NSArray *args, NSDic
     [[NSRunLoop mainRunLoop] run];
 }
 
+NSArray *get_apps(DVTiOSDevice *device)
+{
+    /* Getting the apps actually happens inside the main loop, but since we're not in the main loop, the first calls will fail. */
+    [device applications];
+    [device systemApplications];
+    unsigned max_iters = 16;
+    NSSet *apps = nil;
+    NSSet *system_apps = nil;
+    while ([apps count] == 0 || [system_apps count] == 0) {
+        apps = [device applications];
+        system_apps = [device systemApplications];
+        [[NSRunLoop mainRunLoop] runUntilDate:[[NSDate date] dateByAddingTimeInterval:0.5]];
+        if (--max_iters == 0) {
+            break;
+        }
+    }
+    
+    return [[apps setByAddingObjectsFromSet:system_apps] allObjects];
+
+}
+
 int main(int argc, const char * argv[])
 {
     @autoreleasepool {
@@ -300,6 +321,8 @@ int main(int argc, const char * argv[])
         bool extract_crash_logs = false;
         bool delete_crash_logs = false;
         bool delete_all_crash_logs = false;
+        bool lldb = false;
+        NSString *lldb_arg = NULL;
         
         for (int i = 1; i < argc; i++) {
             const char *arg = argv[i];
@@ -320,14 +343,14 @@ int main(int argc, const char * argv[])
                 
                 if (strcmp(arg, "-x") == 0) {
                     i++;
-                    if (list || list_devs || extract_to || delete_crash_logs || screenshot_dest) goto usage;
+                    if (lldb || list || list_devs || extract_to || delete_crash_logs || screenshot_dest) goto usage;
                     extract_to = @(argv[i]);
                     continue;
                 }
                 
                 if (strcmp(arg, "-L") == 0) {
                     i++;
-                    if (list || list_devs || extract_to || delete_crash_logs || screenshot_dest) goto usage;
+                    if (lldb || list || list_devs || extract_to || delete_crash_logs || screenshot_dest) goto usage;
                     extract_to = @(argv[i]);
                     extract_crash_logs = true;
                     continue;
@@ -335,8 +358,16 @@ int main(int argc, const char * argv[])
                 
                 if (strcmp(arg, "-s") == 0) {
                     i++;
-                    if (list || list_devs || extract_to || delete_crash_logs || screenshot_dest) goto usage;
+                    if (lldb || list || list_devs || extract_to || delete_crash_logs || screenshot_dest) goto usage;
                     screenshot_dest = @(argv[i]);
+                    continue;
+                }
+                
+                if (strcmp(arg, "--lldb") == 0) {
+                    i++;
+                    lldb = true;
+                    if (list_devs || list || delete_crash_logs || extract_to || screenshot_dest) goto usage;
+                    lldb_arg = @(argv[i]);
                     continue;
                 }
             }
@@ -362,21 +393,22 @@ int main(int argc, const char * argv[])
             
             if (strcmp(arg, "-l") == 0) {
                 list = true;
-                if (list_devs || delete_crash_logs || extract_to || screenshot_dest) goto usage;
+                if (lldb || list_devs || delete_crash_logs || extract_to || screenshot_dest) goto usage;
                 continue;
             }
             
             if (strcmp(arg, "-D") == 0) {
                 list_devs = true;
-                if (list || delete_crash_logs || extract_to || screenshot_dest) goto usage;
+                if (lldb || list || delete_crash_logs || extract_to || screenshot_dest) goto usage;
                 continue;
             }
             
             if (strcmp(arg, "-r") == 0) {
                 delete_crash_logs = true;
-                if (list || list_devs || extract_to || screenshot_dest) goto usage;
+                if (lldb || list || list_devs || extract_to || screenshot_dest) goto usage;
                 continue;
             }
+            
             
             if (strcmp(arg, "-a") == 0) {
                 if (delete_all_crash_logs) goto usage;
@@ -399,7 +431,7 @@ int main(int argc, const char * argv[])
         method_setImplementation(class_getInstanceMethod([DTDKMobileDeviceToken class] ?: [DTDKRemoteDeviceToken class], @selector(copyAndProcessSharedCache)),
                                  (IMP) copy_shared_cache);
         
-        if (!bundle_id != (list || list_devs || extract_crash_logs || delete_crash_logs || screenshot_dest)) {
+        if (!bundle_id != (lldb || list || list_devs || extract_crash_logs || delete_crash_logs || screenshot_dest)) {
 usage:
             err(@"Usage:");
             err(@"Launch aplication:           %s [-v] [-d device_id] [-n] [-w] [-e ENV=VALUE [-e ENV2=VALUE2 ...]] bundle_id [arg1, ...]", argv[0]);
@@ -409,6 +441,7 @@ usage:
             err(@"Extract and sync crash logs: %s [-v] [-d device_id] -L output_folder", argv[0]);
             err(@"Remove crash logs:           %s [-v] [-a] [-d device_id] -r", argv[0]);
             err(@"Take screenshot:             %s [-v] [-d device_id] -s output_png", argv[0]);
+            err(@"Debug an app:                %s [-v] [-d device_id] --lldb pid/path/bundle_id", argv[0]);
             err(@"");
             err(@"Flags:");
             err(@"-v: Verbose");
@@ -454,6 +487,47 @@ usage:
             }
         }
         
+        if (lldb) {
+            DTDKRemoteDeviceToken *token = [device token];
+            id am_device = [[token primaryConnection] deviceRef];
+            id connection = nil;
+            int ret = 0;
+            while ((ret = AMDeviceConnect(am_device) | AMDeviceStartSession(am_device))) {
+                [[NSRunLoop mainRunLoop] runUntilDate:[[NSDate date] dateByAddingTimeInterval:1]];
+            }
+            while (connection == nil) {
+                AMDeviceSecureStartService(am_device, @"com.apple.debugserver", @{
+                                                                                    @"CloseOnInvalidate": @(1),
+                                                                                    @"InvalidateOnDetach": @(1),
+                                                                                    }, &connection);
+            }
+            NSString *symbols_path = [[[device token] idealExistingSymbolsDirectory:nil] pathString];
+            if ([lldb_arg hasPrefix:@"/"]) {
+                execlp("lldb", "lldb",
+                        "-o", [[NSString stringWithFormat:@"target create \"%@/usr/lib/dyld\"", symbols_path] UTF8String],
+                        "-o", [[NSString stringWithFormat:@"script lldb.target.module['dyld'].SetPlatformFileSpec(lldb.SBFileSpec(\'%@\'))", lldb_arg] UTF8String],
+                        "-o", "platform select remote-ios", "-o", [[NSString stringWithFormat:@"process connect fd://%d", AMDServiceConnectionGetSocket(connection)] UTF8String],
+                        "-o", "process launch -p gdb-remote -s", NULL);
+            }
+            if ([lldb_arg integerValue]) {
+                execlp("lldb", "lldb",
+                        "-o", [[NSString stringWithFormat:@"process connect fd://%d", AMDServiceConnectionGetSocket(connection)] UTF8String],
+                        "-o", [[NSString stringWithFormat:@"process attach -P gdb-remote --pid %ld", [lldb_arg integerValue]] UTF8String], NULL);
+            }
+            NSArray *applications = get_apps(device);
+            for (DTDKApplication *loop_app in applications) {
+                if ([[loop_app bundleIdentifier] isEqualToString:lldb_arg]) {
+                    execlp("lldb", "lldb",
+                            "-o", [[NSString stringWithFormat:@"target create \"%@/usr/lib/dyld\"", symbols_path] UTF8String],
+                            "-o", [[NSString stringWithFormat:@"script lldb.target.module['dyld'].SetPlatformFileSpec(lldb.SBFileSpec(\'%@/%@\'))", [loop_app devicePath], [loop_app executableName]] UTF8String],
+                            "-o", "platform select remote-ios", "-o", [[NSString stringWithFormat:@"process connect fd://%d", AMDServiceConnectionGetSocket(connection)] UTF8String],
+                            "-o", "process launch -p gdb-remote -s", NULL);
+                }
+            }
+            err(@"Count not find application with bundle ID %@", lldb_arg);
+            return 1;
+        }
+        
         /* Handle -r */
         if (delete_crash_logs) {
             delete_crashes(device, delete_all_crash_logs);
@@ -489,13 +563,7 @@ usage:
             err(@"Getting applications");
         }
         
-        /* Getting the apps actually happens inside the main loop, but since we're not in the main loop, the first calls will fail. */
-        [device applications];
-        [device systemApplications];
-        [[NSRunLoop mainRunLoop] runUntilDate:[[NSDate date] dateByAddingTimeInterval:1]];
-        
-        /* Get apps */
-        NSArray *applications = [[[device applications] setByAddingObjectsFromSet:[device systemApplications]] allObjects];
+        NSArray *applications = get_apps(device);
         
         /* Choose an app */
         DTDKApplication *app = nil;
