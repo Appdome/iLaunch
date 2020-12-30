@@ -20,7 +20,7 @@ iLaunch can do the following:
  
 ## Compilation, Installation and Requirements
 
-To use iLaunch, a copy of Xcode is required. iLaunch was tested with Xcode 7, 8 and 9 beta. Compilation is done by running `make`; installation is done by running `make install`.
+To use iLaunch, a copy of Xcode 12 is required. Compilation is done by running `make`; installation is done by running `make install`.
 
 ## License
 
