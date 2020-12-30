@@ -27,6 +27,7 @@ SOFTWARE.
 #include <Foundation/Foundation.h>
 #include <objc/objc-runtime.h>
 #include "xcode.h"
+#include <netinet/in.h>
 
 /* Logging and output macros */
 #define out(...) puts([[NSString stringWithFormat:__VA_ARGS__] UTF8String])
@@ -38,6 +39,7 @@ static bool interactive = true;
 static bool wait_for_finish = false;
 static NSString *extract_to = nil;
 static NSString *screenshot_dest = nil;
+static int iosVersion = 0;
 
 /* Obj C hooks we must install */
 
@@ -97,6 +99,30 @@ static void pid_died_callback(IDELaunchiPhoneLauncher *self, SEL _cmd, NSNumber 
     exit(0);
 }
 
+id (*originalStartServiceWithIdentifier)(DTDKRemoteDeviceConnection *self, SEL _cmd, NSString *serviceIdentifier);
+id swizzle_startServiceWithIdentifier(DTDKRemoteDeviceConnection *self, SEL _cmd, NSString *serviceIdentifier)
+{
+    static int errfd = 0;
+
+    // This suppresses the huge log that get printed on iOS 13 and under
+    if (iosVersion < 14 && [serviceIdentifier hasSuffix:@"DVTSecureSocketProxy"]) {
+        if (errfd == 0) {
+            errfd = dup(STDERR_FILENO);
+            int devnull = open("/dev/null", O_WRONLY);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        return nil;
+    }
+    // Enable logs again.
+    if (errfd != 0) {
+        dup2(errfd, STDERR_FILENO);
+        close(errfd);
+        errfd = 0;
+    }
+    return originalStartServiceWithIdentifier(self, @selector(startServiceWithIdentifier:), serviceIdentifier);
+}
+
 static void output_received(IDELaunchiPhoneLauncher *self, SEL _cmd, NSString *output, int pid, unsigned long long time)
 {
     out(@"%@", output);
@@ -111,10 +137,9 @@ static void set_runnable_pid(IDELaunchiPhoneLauncher *self, SEL _cmd, int pid)
 
 /* IDEExecutionRunnableTracker */
 
-static void running_did_finish(IDEExecutionRunnableTracker *self, SEL _cmd, id arg, id error)
+static void running_did_finish(IDEExecutionRunnableTracker *self, SEL _cmd, id error)
 {
-    err(@"%@: %@", arg, error);
-    exit(1);
+    exit(0);
 }
 
 static void execution_wants_hold(IDEExecutionRunnableTracker *self, SEL _cmd, bool hold, NSError *error)
@@ -184,34 +209,44 @@ void delete_crashes(DVTiOSDevice *device, bool delete_all_crash_logs)
 {
     id crash_service = [[device token] startCrashReportCopyMobileServiceWithError:nil];
     void *context = AMDServiceConnectionGetSecureIOContext(crash_service);
-    id afc_connection = AFCConnectionCreate(0, AMDServiceConnectionGetSocket(crash_service), 0, 0, 0);
+    id afc_connection = AFCConnectionCreate(0, AMDServiceConnectionGetSocket((ServiceConnectionRef)crash_service), 0, 0, 0);
     if (context) {
         AFCConnectionSetSecureContext(afc_connection, context);
     }
     
-    id dir = nil;
-    AFCDirectoryOpen(afc_connection, ".", &dir);
-    for (char *dirent = NULL; AFCDirectoryRead(afc_connection, dir, &dirent), dirent; ) {
-        NSString *nsent = @(dirent);
-        if ([nsent hasSuffix:@".synced"]) {
-            if (verbose) {
-                err(@"Removing file at %s", dirent);
+    char *folders_to_clean[] = { ".", "./Retired", "./Panics", "./Baseband", "./DiagnosticLogs" };
+    for (int i = 0; i < sizeof(folders_to_clean) / sizeof(folders_to_clean[0]); i++) {
+        id dir = nil;
+        AFCDirectoryOpen(afc_connection, folders_to_clean[i], &dir);
+        for (char *dirent = NULL; AFCDirectoryRead(afc_connection, dir, &dirent), dirent; ) {
+            NSString *nsent = @(dirent);
+            const char *file_path = [[[@(folders_to_clean[i]) stringByAppendingString:@"/"] stringByAppendingString:nsent] fileSystemRepresentation];
+            if ([nsent hasSuffix:@".synced"]) {
+                if (verbose) {
+                    err(@"Removing file at %s", file_path);
+                }
+                AFCRemovePath(afc_connection, file_path);
             }
-            AFCRemovePath(afc_connection, dirent);
-        }
-        else if (delete_all_crash_logs && [nsent hasSuffix:@".ips"]) {
-            if (verbose) {
-                err(@"Removing file at %s", dirent);
+            else if (delete_all_crash_logs && [nsent hasSuffix:@".ips"]) {
+                if (verbose) {
+                    err(@"Removing file at %s", file_path);
+                }
+                AFCRemovePath(afc_connection, file_path);
             }
-            AFCRemovePath(afc_connection, dirent);
-        }
-        else {
-            if (verbose) {
-                err(@"Skipping %s", dirent);
+            else if (delete_all_crash_logs && ([nsent hasSuffix:@".metriclog"] || [nsent hasSuffix:@".metriclog.anon"])) {
+                if (verbose) {
+                    err(@"Removing file at %s", file_path);
+                }
+                AFCRemovePath(afc_connection, file_path);
+            }
+            else {
+                if (verbose) {
+                    err(@"Skipping %s", file_path);
+                }
             }
         }
+        AFCDirectoryClose(afc_connection, dir);
     }
-    AFCDirectoryClose(afc_connection, dir);
 }
 
 void launch_app(DVTiOSDevice *device, DTDKApplication *app, NSArray *args, NSDictionary *env)
@@ -232,7 +267,6 @@ void launch_app(DVTiOSDevice *device, DTDKApplication *app, NSArray *args, NSDic
                                                                workingDirectory:nil
                                                                 commandLineArgs:args
                                                            environmentVariables:env /* Extermely useful. Can be used to enable debug features of OBJC, DYLD, etc. */
-                                                                   architecture:nil /* Can't be used to force 32-bit executables on 64-bit devices :( */
                                                              platformIdentifier:@"com.apple.platform.iphoneos"
                                                              buildConfiguration:@"Debug"
                                                                buildableProduct:nil
@@ -260,6 +294,11 @@ void launch_app(DVTiOSDevice *device, DTDKApplication *app, NSArray *args, NSDic
                                                                           runnableType:[runnable runnableUTIType:&what]
                                                                         runDestination:destination];
     
+    // Suppress some logs
+    Method method = class_getInstanceMethod([DTDKRemoteDeviceConnection class], @selector(startServiceWithIdentifier:));
+    originalStartServiceWithIdentifier = (typeof(originalStartServiceWithIdentifier))method_getImplementation(method);
+    method_setImplementation(method, (IMP) swizzle_startServiceWithIdentifier);
+    
     method_setImplementation(class_getInstanceMethod([IDELaunchiPhoneLauncher class], @selector(pidDiedCallback:)),
                              (IMP) pid_died_callback);
     method_setImplementation(class_getInstanceMethod([IDELaunchiPhoneLauncher class], @selector(outputReceived:fromProcess:atTime:)),
@@ -275,7 +314,7 @@ void launch_app(DVTiOSDevice *device, DTDKApplication *app, NSArray *args, NSDic
         err(@"Launching");
     }
     
-    method_setImplementation(class_getInstanceMethod([IDEExecutionRunnableTracker class], @selector(runningDidFinish:withError:)),
+    method_setImplementation(class_getInstanceMethod([IDEExecutionRunnableTracker class], @selector(runningDidFinishWithError:)),
                              (IMP) running_did_finish);
     method_setImplementation(class_getInstanceMethod([IDEExecutionRunnableTracker class], @selector(executionWantsHold:withError:)),
                              (IMP) execution_wants_hold);
@@ -306,6 +345,54 @@ NSArray *get_apps(DVTiOSDevice *device)
     
     return [[apps setByAddingObjectsFromSet:system_apps] allObjects];
 
+}
+
+ServiceConnectionRef connection = nil;
+CFSocketRef lldb_socket;
+
+void disable_ssl(ServiceConnectionRef con)
+{
+    con->conn_SSLContext = NULL;
+}
+
+void debugserver_callback(CFSocketRef socket, CFSocketCallBackType type, CFDataRef address, const void *data, void *info)
+{
+    const int BUF_SIZE = 1024;
+    char buffer[BUF_SIZE];
+    int count = 0;
+    if ((count = AMDServiceConnectionReceive(connection, buffer, BUF_SIZE)) == 0) {
+        CFSocketInvalidate(socket);
+        CFRelease(socket);
+        return;
+    }
+    write(CFSocketGetNative(lldb_socket), buffer, count);
+
+    while (count == BUF_SIZE) {
+        count = AMDServiceConnectionReceive(connection, buffer, BUF_SIZE);
+        if (count > 0) {
+            write(CFSocketGetNative(lldb_socket), buffer, count);
+        }
+    }
+}
+
+void lldb_callback(CFSocketRef socket, CFSocketCallBackType type, CFDataRef address, const void *data, void *info)
+{
+    if (CFDataGetLength(data) == 0) {
+        // lldb disconnected. We are done
+        CFSocketInvalidate(socket);
+        CFRelease(socket);
+        CFRunLoopStop(CFRunLoopGetMain());
+        return;
+    }
+    AMDServiceConnectionSend(connection, CFDataGetBytePtr(data),  CFDataGetLength(data));
+}
+
+void fd_callback(CFSocketRef socket, CFSocketCallBackType type, CFDataRef address, const void *data, void *info)
+{
+    lldb_socket = CFSocketCreateWithNative(NULL, *(CFSocketNativeHandle *)data, kCFSocketDataCallBack, &lldb_callback, NULL);
+    CFRunLoopAddSource(CFRunLoopGetMain(), CFSocketCreateRunLoopSource(NULL, lldb_socket, 0), kCFRunLoopCommonModes);
+    CFSocketInvalidate(socket);
+    CFRelease(socket);
 }
 
 int main(int argc, const char * argv[])
@@ -455,7 +542,7 @@ usage:
         
         /* Get devices */
         NSArray *devices = get_devices(!list_devs && !device_id);
-        DVTiOSDevice *device;
+        DVTiOSDevice *device = nil;
         
         /* Handle -D */
         if (list_devs) {
@@ -487,45 +574,91 @@ usage:
             }
         }
         
+        DTDKRemoteDeviceToken *token = [device token];
+        iosVersion = [[token productVersion] intValue];
+        
         if (lldb) {
-            DTDKRemoteDeviceToken *token = [device token];
             id am_device = [[token primaryConnection] deviceRef];
-            id connection = nil;
             int ret = 0;
             while ((ret = AMDeviceConnect(am_device) | AMDeviceStartSession(am_device))) {
                 [[NSRunLoop mainRunLoop] runUntilDate:[[NSDate date] dateByAddingTimeInterval:1]];
             }
-            while (connection == nil) {
-                AMDeviceSecureStartService(am_device, @"com.apple.debugserver", @{
-                                                                                    @"CloseOnInvalidate": @(1),
-                                                                                    @"InvalidateOnDetach": @(1),
-                                                                                    }, &connection);
+
+            CFStringRef serviceName = CFSTR("com.apple.debugserver");
+            if (iosVersion >= 14) {
+                serviceName = CFSTR("com.apple.debugserver.DVTSecureSocketProxy");
             }
+
+            while (connection == nil) {
+                AMDeviceSecureStartService(am_device, serviceName, @{
+                                                                    @"CloseOnInvalidate": @(1),
+                                                                    @"InvalidateOnDetach": @(1),
+                                                                    }, &connection);
+            }
+            if (iosVersion < 14) {
+                disable_ssl(connection);
+            }
+            
+            CFSocketRef debugserver_socket = CFSocketCreateWithNative(NULL, AMDServiceConnectionGetSocket(connection), kCFSocketReadCallBack, &debugserver_callback, NULL);
+            CFRunLoopAddSource(CFRunLoopGetMain(), CFSocketCreateRunLoopSource(NULL, debugserver_socket, 0), kCFRunLoopCommonModes);
+
+            struct sockaddr_in addr = {0};
+            addr.sin_len = sizeof(addr);
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+            CFSocketRef fd_socket = CFSocketCreate(NULL, PF_INET, 0, 0, kCFSocketAcceptCallBack, &fd_callback, NULL);
+            CFDataRef addr_data = CFDataCreate(NULL, (const UInt8 *)&addr, sizeof(addr));
+            CFSocketSetAddress(fd_socket, addr_data);
+            CFRelease(addr_data);
+            CFRunLoopAddSource(CFRunLoopGetMain(), CFSocketCreateRunLoopSource(NULL, fd_socket, 0), kCFRunLoopCommonModes);
+            
+            socklen_t addrlen = sizeof(addr);
+            if (getsockname(CFSocketGetNative(fd_socket), (struct sockaddr*)&addr, &addrlen) == -1) {
+                err(@"Failed to get sock name.");
+            }
+            
+            int port = ntohs(addr.sin_port);
             NSString *symbols_path = [[[device token] idealExistingSymbolsDirectory:nil] pathString];
             if ([lldb_arg hasPrefix:@"/"]) {
-                execlp("lldb", "lldb",
-                        "-o", [[NSString stringWithFormat:@"target create \"%@/usr/lib/dyld\"", symbols_path] UTF8String],
-                        "-o", [[NSString stringWithFormat:@"script lldb.target.module['dyld'].SetPlatformFileSpec(lldb.SBFileSpec(\'%@\'))", lldb_arg] UTF8String],
-                        "-o", "platform select remote-ios", "-o", [[NSString stringWithFormat:@"process connect fd://%d", AMDServiceConnectionGetSocket(connection)] UTF8String],
-                        "-o", "process launch -p gdb-remote -s", NULL);
-            }
-            if ([lldb_arg integerValue]) {
-                execlp("lldb", "lldb",
-                        "-o", [[NSString stringWithFormat:@"process connect fd://%d", AMDServiceConnectionGetSocket(connection)] UTF8String],
-                        "-o", [[NSString stringWithFormat:@"process attach -P gdb-remote --pid %ld", [lldb_arg integerValue]] UTF8String], NULL);
-            }
-            NSArray *applications = get_apps(device);
-            for (DTDKApplication *loop_app in applications) {
-                if ([[loop_app bundleIdentifier] isEqualToString:lldb_arg]) {
+                if (fork() == 0) {
                     execlp("lldb", "lldb",
                             "-o", [[NSString stringWithFormat:@"target create \"%@/usr/lib/dyld\"", symbols_path] UTF8String],
-                            "-o", [[NSString stringWithFormat:@"script lldb.target.module['dyld'].SetPlatformFileSpec(lldb.SBFileSpec(\'%@/%@\'))", [loop_app devicePath], [loop_app executableName]] UTF8String],
-                            "-o", "platform select remote-ios", "-o", [[NSString stringWithFormat:@"process connect fd://%d", AMDServiceConnectionGetSocket(connection)] UTF8String],
+                            "-o", [[NSString stringWithFormat:@"script lldb.target.module['dyld'].SetPlatformFileSpec(lldb.SBFileSpec(\'%@\'))", lldb_arg] UTF8String],
+                            "-o", "platform select remote-ios",
+                            "-o", [[NSString stringWithFormat:@"process connect connect://127.0.0.1:%d", port] UTF8String],
                             "-o", "process launch -p gdb-remote -s", NULL);
                 }
             }
-            err(@"Count not find application with bundle ID %@", lldb_arg);
-            return 1;
+            if ([lldb_arg integerValue]) {
+                if (fork() == 0) {
+                    execlp("lldb", "lldb",
+                            "-o", [[NSString stringWithFormat:@"process connect connect://127.0.0.1:%d", port] UTF8String],
+                            "-o", [[NSString stringWithFormat:@"process attach -P gdb-remote --pid %ld", [lldb_arg integerValue]] UTF8String], NULL);
+                }
+            }
+            bool found = false;
+            NSArray *applications = get_apps(device);
+            for (DTDKApplication *loop_app in applications) {
+                if ([[loop_app bundleIdentifier] isEqualToString:lldb_arg]) {
+                    found = true;
+                    if (fork() == 0) {
+                        execlp("lldb", "lldb",
+                                "-o", [[NSString stringWithFormat:@"target create \"%@/usr/lib/dyld\"", symbols_path] UTF8String],
+                                "-o", [[NSString stringWithFormat:@"script lldb.target.module['dyld'].SetPlatformFileSpec(lldb.SBFileSpec(\'%@/%@\'))", [loop_app devicePath], [loop_app executableName]] UTF8String],
+                                "-o", "platform select remote-ios",
+                                "-o", [[NSString stringWithFormat:@"process connect connect://127.0.0.1:%d", port] UTF8String],
+                                "-o", "process launch -p gdb-remote -s", NULL);
+                    }
+                }
+            }
+            if (!found) {
+                err(@"Count not find application with bundle ID %@", lldb_arg);
+                return 1;
+            }
+
+            CFRunLoopRun();
+            return 0;
         }
         
         /* Handle -r */
@@ -610,3 +743,14 @@ usage:
     }
     return 0;
 }
+
+@implementation NSURLRequest(IgnoreSSL)
++ (BOOL)allowsAnyHTTPSCertificateForHost:(NSString *)host
+{
+    return NO;
+}
++ (BOOL)allowsSpecificHTTPSCertificateForHost:(NSString *)host
+{
+    return NO;
+}
+@end

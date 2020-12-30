@@ -46,16 +46,18 @@ extern void IDEInitialize(int flags, id *arg1);
 extern void IDESetSafeToLoadMobileDevice(void);
 
 id (*AFCConnectionCreate)(int unknown, int socket, int unknown2, int unknown3, void *context);
-int (*AMDServiceConnectionGetSocket)(id connection);
+int (*AMDServiceConnectionGetSocket)(ServiceConnectionRef connection);
 void *(*AMDServiceConnectionGetSecureIOContext)(id service);
 void (*AFCConnectionSetSecureContext)(id connection, void *context);
 int (*AFCRemovePath)(id connection, const char *path);
 int (*AFCDirectoryOpen)(id connection, const char *path, id *dir);
 int (*AFCDirectoryRead)(id connection, id dir, char **dirent);
 int (*AFCDirectoryClose)(id connection, id dir);
-int (*AMDeviceSecureStartService)(id device, NSString *service_name, NSDictionary *options, id *result);
+int (*AMDeviceSecureStartService)(id device, CFStringRef service_name, NSDictionary *options, id result);
 int (*AMDeviceStartSession)(id device);
 int (*AMDeviceConnect)(id device);
+int (*AMDServiceConnectionReceive)(ServiceConnectionRef con, void * data, size_t size);
+int (*AMDServiceConnectionSend)(ServiceConnectionRef con, const void * data, size_t size);
 
 __attribute__((constructor)) static void link_and_init_xcode(void)
 {
@@ -150,9 +152,15 @@ __attribute__((constructor)) static void link_and_init_xcode(void)
     
     AMDeviceConnect = dlsym(RTLD_DEFAULT, "AMDeviceConnect");
     assert(AMDeviceConnect);
+    
+    AMDServiceConnectionReceive = dlsym(RTLD_DEFAULT, "AMDServiceConnectionReceive");
+    assert(AMDServiceConnectionReceive);
+    
+    AMDServiceConnectionSend = dlsym(RTLD_DEFAULT, "AMDServiceConnectionSend");
+    assert(AMDServiceConnectionSend);
 
     
-    /* After loading, check for any false class we declared to fix its 
+    /* After loading, check for any false class we declared to fix its
        reference using objc_getClass. */
     Class *classref = classrefs;
     while (classref != &classrefs_end) {

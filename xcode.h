@@ -24,6 +24,8 @@ SOFTWARE.
 
 */
 
+#pragma once
+
 /* Classes and APIs used by Xcode */
 #include <Foundation/Foundation.h>
 
@@ -77,7 +79,7 @@ SOFTWARE.
 - (void)primitiveInvalidate;
 - (void)terminate;
 - (void)_deviceWoke;
-- (void)pidDiedCallback:(NSNumber *)arg1;
+- (void)pidDiedCallback:(id)arg1;
 - (void)_cancelServiceHubProcessControlChannel;
 - (id)_serviceHubProcessControlChannel;
 - (id)_bestPrimaryInstrumentsServer;
@@ -87,6 +89,7 @@ SOFTWARE.
 - (void)_continueStarting;
 - (void)start;
 - (void)_holdExecutionWithError:(id)arg1;
+- (void)setRunnablePID:(int)pid;
 
 @end
 
@@ -95,7 +98,7 @@ SOFTWARE.
 @end
 
 @interface IDELaunchParametersSnapshot : NSObject
-+ (id)launchParametersWithSchemeIdentifier:(id)arg1 launcherIdentifier:(id)arg2 debuggerIdentifier:(id)arg3 launchStyle:(int)arg4 runnableLocation:(id)arg5 debugProcessAsUID:(unsigned int)arg6 workingDirectory:(id)arg7 commandLineArgs:(id)arg8 environmentVariables:(id)arg9 architecture:(id)arg10 platformIdentifier:(id)arg11 buildConfiguration:(id)arg12 buildableProduct:(id)arg13 deviceAppDataPackage:(id)arg14 allowLocationSimulation:(BOOL)arg15 locationScenarioReference:(id)arg16 showNonLocalizedStrings:(BOOL)arg17 language:(id)arg18 region:(id)arg19 routingCoverageFileReference:(id)arg20 enableGPUFrameCaptureMode:(int)arg21 enableGPUValidationMode:(int)arg22 debugXPCServices:(BOOL)arg23 debugAppExtensions:(BOOL)arg24 internalIOSLaunchStyle:(int)arg25 internalIOSSubstitutionApp:(id)arg26 launchAutomaticallySubstyle:(unsigned long long)arg27;
++ (id)launchParametersWithSchemeIdentifier:(id)arg1 launcherIdentifier:(id)arg2 debuggerIdentifier:(id)arg3 launchStyle:(int)arg4 runnableLocation:(id)arg5 debugProcessAsUID:(unsigned int)arg6 workingDirectory:(id)arg7 commandLineArgs:(id)arg8 environmentVariables:(id)arg9 platformIdentifier:(id)arg11 buildConfiguration:(id)arg12 buildableProduct:(id)arg13 deviceAppDataPackage:(id)arg14 allowLocationSimulation:(BOOL)arg15 locationScenarioReference:(id)arg16 showNonLocalizedStrings:(BOOL)arg17 language:(id)arg18 region:(id)arg19 routingCoverageFileReference:(id)arg20 enableGPUFrameCaptureMode:(int)arg21 enableGPUValidationMode:(int)arg22 debugXPCServices:(BOOL)arg23 debugAppExtensions:(BOOL)arg24 internalIOSLaunchStyle:(int)arg25 internalIOSSubstitutionApp:(id)arg26 launchAutomaticallySubstyle:(unsigned long long)arg27;
 - (void) setRunnableBundleIdentifier: (NSString*)identifier;
 @end
 
@@ -181,24 +184,29 @@ SOFTWARE.
 - (id)notFinishedReasonWithDepth:(unsigned long long)arg1;
 - (void)executionWantsHold:(BOOL)arg1 withError:(id)arg2;
 - (void)runningDidFinish:(id)arg1 withError:(id)arg2;
+- (void)runningDidFinishWithError:(id)arg1;
 - (void)cancel;
 - (BOOL)isFinished;
 - (id)initWithWorker:(id)arg1;
 @end
 
 @interface DTDKCrashLogDatabase : NSObject
+- (id)importCrashLogs:(NSArray*)logs;
 @end
 
 @interface DVTiPhoneScreenshotController : NSObject
+- (void)addCapturedScreenshot:(id)data;
 @end
 
 @interface DTDKRemoteDeviceConnection : NSObject
 - (id) deviceRef;
+- (id) startServiceWithIdentifier:(NSString*)serviceIdentifier;
 @end
 
 @interface DTDKMobileDeviceToken : NSObject
 - (DTDKRemoteDeviceConnection *) primaryConnection;
 - (DVTFilePath *) idealExistingSymbolsDirectory:(void *) unknown;
+- (id)copyAndProcessSharedCache;
 @end
 
 @interface DTDKRemoteDeviceToken : DTDKMobileDeviceToken
@@ -232,14 +240,23 @@ SOFTWARE.
 -(instancetype) initWithResult:(id)result;
 @end
 
+typedef struct {
+    char unused[0x14];
+    void *conn_SSLContext;
+} service_connection;
+
+typedef service_connection * ServiceConnectionRef;
+
 extern id (*AFCConnectionCreate)(int unknown, int socket, int unknown2, int unknown3, void *context);
-extern int (*AMDServiceConnectionGetSocket)(id connection);
+extern int (*AMDServiceConnectionGetSocket)(ServiceConnectionRef connection);
 extern void *(*AMDServiceConnectionGetSecureIOContext)(id service);
 extern void (*AFCConnectionSetSecureContext)(id connection, void *context);
 extern int (*AFCRemovePath)(id connection, const char *path);
 extern int (*AFCDirectoryOpen)(id connection, const char *path, id *dir);
 extern int (*AFCDirectoryRead)(id connection, id dir, char **dirent);
 extern int (*AFCDirectoryClose)(id connection, id dir);
-extern int (*AMDeviceSecureStartService)(id device, NSString *service_name, NSDictionary *options, id *result);
+extern int (*AMDeviceSecureStartService)(id device, CFStringRef service_name, NSDictionary *options, id result);
 extern int (*AMDeviceStartSession)(id device);
 extern int (*AMDeviceConnect)(id device);
+extern int (*AMDServiceConnectionReceive)(ServiceConnectionRef con, void * data, size_t size);
+extern int (*AMDServiceConnectionSend)(ServiceConnectionRef con, const void * data, size_t size);
