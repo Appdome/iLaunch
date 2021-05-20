@@ -53,7 +53,7 @@ int (*AFCRemovePath)(id connection, const char *path);
 int (*AFCDirectoryOpen)(id connection, const char *path, id *dir);
 int (*AFCDirectoryRead)(id connection, id dir, char **dirent);
 int (*AFCDirectoryClose)(id connection, id dir);
-int (*AMDeviceSecureStartService)(id device, CFStringRef service_name, NSDictionary *options, id result);
+int (*AMDeviceSecureStartService)(id device, CFStringRef service_name, NSDictionary *options, ServiceConnectionRef result);
 int (*AMDeviceStartSession)(id device);
 int (*AMDeviceConnect)(id device);
 int (*AMDServiceConnectionReceive)(ServiceConnectionRef con, void * data, size_t size);

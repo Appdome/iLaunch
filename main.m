@@ -257,8 +257,67 @@ void launch_app(DVTiOSDevice *device, DTDKApplication *app, NSArray *args, NSDic
     
     IDERunDestination *destination = [[IDERunDestination alloc] initWithTargetDevice:device architecture:nil SDK:nil];
     
-    IDELaunchParametersSnapshot *parameters = [IDELaunchParametersSnapshot
-                                           launchParametersWithSchemeIdentifier:nil /*IDEEntityIdentifier*/
+    IDELaunchParametersSnapshot *parameters = nil;
+    
+    if ([IDELaunchParametersSnapshot respondsToSelector:@selector(launchParametersWithSchemeIdentifier:launcherIdentifier:debuggerIdentifier:launchStyle:runnableLocation:debugProcessAsUID:workingDirectory:commandLineArgs:environmentVariables:architecture:platformIdentifier:buildConfiguration:buildableProduct:deviceAppDataPackage:allowLocationSimulation:locationScenarioReference:showNonLocalizedStrings:language:region:routingCoverageFileReference:enableGPUFrameCaptureMode:enableGPUValidationMode:debugXPCServices:debugAppExtensions:internalIOSLaunchStyle:internalIOSSubstitutionApp:launchAutomaticallySubstyle:)]) {
+        parameters = [IDELaunchParametersSnapshot launchParametersWithSchemeIdentifier:nil /*IDEEntityIdentifier*/
+                                                             launcherIdentifier:@"Xcode.IDEFoundation.Launcher.PosixSpawn"
+                                                             debuggerIdentifier:nil
+                                                                    launchStyle:0
+                                                               runnableLocation:nil
+                                                              debugProcessAsUID:NO
+                                                               workingDirectory:nil
+                                                                commandLineArgs:args
+                                                           environmentVariables:env /* Extermely useful. Can be used to enable debug features of OBJC, DYLD, etc. */
+                                                                   architecture:nil /* Can't be used to force 32-bit executables on 64-bit devices :( */
+                                                             platformIdentifier:@"com.apple.platform.iphoneos"
+                                                             buildConfiguration:@"Debug"
+                                                               buildableProduct:nil
+                                                           deviceAppDataPackage:nil
+                                                        allowLocationSimulation:NO
+                                                      locationScenarioReference:nil
+                                                        showNonLocalizedStrings:NO
+                                                                       language:nil
+                                                                         region:nil
+                                                   routingCoverageFileReference:nil
+                                                      enableGPUFrameCaptureMode:NO
+                                                        enableGPUValidationMode:NO
+                                                               debugXPCServices:NO
+                                                             debugAppExtensions:NO
+                                                         internalIOSLaunchStyle:0
+                                                     internalIOSSubstitutionApp:nil
+                                                    launchAutomaticallySubstyle:2
+                                               ];
+    } else if ([IDELaunchParametersSnapshot respondsToSelector:@selector(launchParametersWithSchemeIdentifier:launcherIdentifier:debuggerIdentifier:launchStyle:runnableLocation:debugProcessAsUID:workingDirectory:commandLineArgs:environmentVariables:platformIdentifier:buildConfiguration:buildableProduct:deviceAppDataPackage:allowLocationSimulation:locationScenarioReference:showNonLocalizedStrings:language:region:routingCoverageFileReference:enableGPUFrameCaptureMode:enableGPUValidationMode:debugXPCServices:debugAppExtensions:internalIOSSubstitutionApp:launchAutomaticallySubstyle:)]) {
+        parameters = [IDELaunchParametersSnapshot launchParametersWithSchemeIdentifier:nil /*IDEEntityIdentifier*/
+                                                             launcherIdentifier:@"Xcode.IDEFoundation.Launcher.PosixSpawn"
+                                                             debuggerIdentifier:nil
+                                                                    launchStyle:0
+                                                               runnableLocation:nil
+                                                              debugProcessAsUID:NO
+                                                               workingDirectory:nil
+                                                                commandLineArgs:args
+                                                           environmentVariables:env /* Extermely useful. Can be used to enable debug features of OBJC, DYLD, etc. */
+                                                             platformIdentifier:@"com.apple.platform.iphoneos"
+                                                             buildConfiguration:@"Debug"
+                                                               buildableProduct:nil
+                                                           deviceAppDataPackage:nil
+                                                        allowLocationSimulation:NO
+                                                      locationScenarioReference:nil
+                                                        showNonLocalizedStrings:NO
+                                                                       language:nil
+                                                                         region:nil
+                                                   routingCoverageFileReference:nil
+                                                      enableGPUFrameCaptureMode:NO
+                                                        enableGPUValidationMode:NO
+                                                               debugXPCServices:NO
+                                                             debugAppExtensions:NO
+                                                     internalIOSSubstitutionApp:nil
+                                                    launchAutomaticallySubstyle:2
+                                               ];
+
+    } else if ([IDELaunchParametersSnapshot respondsToSelector:@selector(launchParametersWithSchemeIdentifier:launcherIdentifier:debuggerIdentifier:launchStyle:runnableLocation:debugProcessAsUID:workingDirectory:commandLineArgs:environmentVariables:platformIdentifier:buildConfiguration:buildableProduct:deviceAppDataPackage:allowLocationSimulation:locationScenarioReference:showNonLocalizedStrings:language:region:routingCoverageFileReference:enableGPUFrameCaptureMode:enableGPUValidationMode:debugXPCServices:debugAppExtensions:internalIOSLaunchStyle:internalIOSSubstitutionApp:launchAutomaticallySubstyle:)]) {
+        parameters = [IDELaunchParametersSnapshot launchParametersWithSchemeIdentifier:nil /*IDEEntityIdentifier*/
                                                              launcherIdentifier:@"Xcode.IDEFoundation.Launcher.PosixSpawn"
                                                              debuggerIdentifier:nil
                                                                     launchStyle:0
@@ -285,6 +344,12 @@ void launch_app(DVTiOSDevice *device, DTDKApplication *app, NSArray *args, NSDic
                                                      internalIOSSubstitutionApp:nil
                                                     launchAutomaticallySubstyle:2
                                                ];
+    }
+    
+    if (parameters == nil) {
+        err(@"Could not create launch parameters.");
+        return;
+    }
     
     [parameters setRunnableBundleIdentifier: [app bundleIdentifier]];
     id what = nil;
